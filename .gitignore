@@ -1,0 +1,7 @@
+.build/
+node_modules/
+# Runtime state: written by `funes add`/the extension beside the install.
+sessions
+spool
+swept
+scripts/funes-sync.log

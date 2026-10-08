@@ -1,0 +1,16 @@
+{
+  "name": "funes-omp",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "omp extension: recall over past AI-assistant sessions bridged to `funes mcp`, and per-turn indexing of the session into that memory.",
+  "scripts": {
+    "clean": "rm -rf .build",
+    "build": "sh -c 'rm -rf .build && mkdir -p .build && node build/splice.mjs build .build/index.ts >/dev/null && cmp .build/index.ts index.ts'",
+    "check": "npm run build && sh test/run.sh node"
+  },
+  "omp": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

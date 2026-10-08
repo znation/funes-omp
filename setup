@@ -1,0 +1,139 @@
+#!/bin/sh
+# funes's omp integration: register this directory with omp as an extension, bind the memory it
+# recalls from and publishes to, and convert the sessions omp has already written.
+#
+# omp's extension API has no MCP client, so index.ts is one: it spawns `funes mcp` over stdio and
+# registers whatever tools/list returns. It also converts each finished turn into the spool funes
+# indexes.
+set -eu
+
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+# The pre-registry install location, unregistered on sight so omp can't load two copies.
+LEGACY="$HOME/.funes/integrations/omp"
+
+usage() {
+    echo "usage: setup add [MEMORY] | setup remove" >&2
+    exit 2
+}
+
+have_omp() {
+    command -v omp >/dev/null 2>&1
+}
+
+# The directory funes drains for this agent. funes hands us its home and our id; the extension sees
+# neither, so the resolved path is written beside it.
+spool_dir() {
+    printf '%s/spool/%s\n' "${FUNES_HOME:-$HOME/.funes}" "${FUNES_AGENT_ID:-omp}"
+}
+
+# Where omp keeps its sessions: either override it honours, else the default. omp is pi-compatible
+# here — its binary reads PI_CODING_AGENT_SESSION_DIR and PI_CODING_AGENT_DIR, only the fallback
+# differs.
+sessions_dir() {
+    if [ -n "${PI_CODING_AGENT_SESSION_DIR:-}" ]; then
+        printf '%s\n' "$PI_CODING_AGENT_SESSION_DIR"
+    else
+        printf '%s/sessions\n' "${PI_CODING_AGENT_DIR:-$HOME/.omp/agent}"
+    fi
+}
+
+# Convert what omp has already written, so recall reaches it before the next turn. The extension runs
+# the same module inside omp, which needs nothing installed; from a shell it needs a JS runtime, and
+# where there is none the extension does this itself at its next start.
+seed() {
+    spool=$1
+    sessions=$(sessions_dir)
+    [ -d "$sessions" ] || return 0
+    for js in node bun deno; do
+        command -v "$js" >/dev/null 2>&1 || continue
+        # index.ts carries the mapping and runs as its own CLI; a runtime too old to strip the
+        # types fails here and the next one is tried, so the spool is never left half converted.
+        if "$js" "$HERE/index.ts" "$sessions" "$spool" >/dev/null; then
+            rm -f "$HERE/seed-pending"
+            return 0
+        fi
+    done
+    printf '%s\n' "$sessions" >"$HERE/seed-pending"
+    echo "no JS runtime on PATH to convert your existing omp sessions — omp will convert them itself" \
+        "the next time it starts." >&2
+}
+
+# `omp uninstall` on a target omp has no registration for prints a spinner and then never returns,
+# with or without a terminal, so every call is bounded and a stall is not treated as a failure: the
+# registration is dropped from omp's settings either way, which is all this needs to achieve.
+unregister() {
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 20 omp uninstall "$1" >/dev/null 2>&1 || true
+    else
+        omp uninstall "$1" >/dev/null 2>&1 || true
+    fi
+}
+
+drop_legacy() {
+    [ -d "$LEGACY" ] || return 0
+    if have_omp; then
+        unregister "$LEGACY"
+    fi
+    rm -rf "$LEGACY"
+}
+
+add() {
+    # The memory index.ts reads at startup; absent is the local memory.
+    if [ -n "${1:-}" ]; then
+        printf '%s\n' "$1" >"$HERE/memory"
+    else
+        rm -f "$HERE/memory"
+    fi
+
+    spool=$(spool_dir)
+    mkdir -p "$spool"
+    printf '%s\n' "$spool" >"$HERE/spool"
+    # The sessions root, for the extension's sweep: a session omp was pointed elsewhere is swept
+    # in its own directory alone.
+    sessions_dir >"$HERE/sessions"
+    seed "$spool"
+
+    drop_legacy
+
+    if ! have_omp; then
+        echo "the funes omp extension is installed at $HERE"
+        echo "\`omp\` isn't on PATH — once it is, run:  omp install $HERE"
+        return 0
+    fi
+
+    omp install "$HERE"
+    echo "installed funes into omp — recall and per-turn indexing are now active (restart omp if" \
+        "it's running)."
+}
+
+remove() {
+    # The spool holds converted copies of omp's own sessions, so dropping it loses nothing a re-add
+    # cannot rebuild — and leaving it would have funes keep indexing an agent it no longer serves.
+    rm -rf "$(spool_dir)"
+    rm -f "$HERE/memory" "$HERE/spool" "$HERE/sessions" "$HERE/seed-pending" "$HERE/swept"
+    drop_legacy
+
+    if ! have_omp; then
+        echo "\`omp\` isn't on PATH — the extension and its automation were removed. Once it is," \
+            "remove the registration manually:  omp uninstall $HERE"
+        return 0
+    fi
+
+    unregister "$HERE"
+    echo "removed funes from omp — extension registration, its automation, and the extracted files."
+}
+
+case "${1:-}" in
+add)
+    shift
+    [ $# -le 1 ] || usage
+    add "${1:-}"
+    ;;
+remove)
+    shift
+    [ $# -eq 0 ] || usage
+    remove
+    ;;
+*) usage ;;
+esac
