@@ -9,7 +9,8 @@ set -eu
 
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
-# The pre-registry install location, unregistered on sight so omp can't load two copies.
+# The pre-registry install location, deleted on sight so omp can't load two copies. A registration
+# still pointing here is left to go inert with the directory.
 LEGACY="$HOME/.funes/integrations/omp"
 
 usage() {
@@ -59,22 +60,14 @@ seed() {
         "the next time it starts." >&2
 }
 
-# `omp uninstall` on a target omp has no registration for prints a spinner and then never returns,
-# with or without a terminal, so every call is bounded and a stall is not treated as a failure: the
-# registration is dropped from omp's settings either way, which is all this needs to achieve.
-unregister() {
-    if command -v timeout >/dev/null 2>&1; then
-        timeout 20 omp uninstall "$1" >/dev/null 2>&1 || true
-    else
-        omp uninstall "$1" >/dev/null 2>&1 || true
-    fi
-}
-
+# Neither verb here unregisters the extension, because omp has no such subcommand: `omp uninstall
+# <x>` is unrecognized and falls through to `omp launch`, which starts an agent session with the path
+# as its prompt — in a terminal an inference call, under a redirect one that never returns — and
+# drops no registration either way. The verb that does exist, `omp plugin uninstall <name>`, shells
+# out to `bun`, which this cannot assume, and it buys nothing: omp ignores a registration whose
+# plugin directory is gone, and funes removes that directory when it removes the agent.
 drop_legacy() {
     [ -d "$LEGACY" ] || return 0
-    if have_omp; then
-        unregister "$LEGACY"
-    fi
     rm -rf "$LEGACY"
 }
 
@@ -115,13 +108,14 @@ remove() {
     drop_legacy
 
     if ! have_omp; then
-        echo "\`omp\` isn't on PATH — the extension and its automation were removed. Once it is," \
-            "remove the registration manually:  omp uninstall $HERE"
+        echo "\`omp\` isn't on PATH — the extension and its automation were removed. omp's" \
+            "registration is left pointing here; it goes inert once this directory is gone."
         return 0
     fi
 
-    unregister "$HERE"
-    echo "removed funes from omp — extension registration, its automation, and the extracted files."
+    echo "removed funes from omp — its automation and the extracted files. omp's registration is" \
+        "left pointing here and goes inert once this directory is gone; \`omp plugin uninstall" \
+        "funes-omp\` (needs \`bun\`) drops it outright."
 }
 
 case "${1:-}" in

@@ -14,29 +14,43 @@ omp exposes its lifecycle to extensions, so the automation rides in the same
 extension: `turn_end` converts the turn just completed and indexes it, and — with
 a memory bound — `session_shutdown` publishes, as does `session_start` when the
 process is fresh (its other starts follow a shutdown that just published).
-Nothing outside `~/.funes/agents/omp` is configured.
+Nothing outside `~/.funes/agents/omp` is written by the extension itself; the
+registration it asks omp for is omp's own bookkeeping, in `~/.omp/plugins/`.
 
 ## Install
 
-Install the package directly with omp, user-wide:
+Clone, then let `funes` install and register it:
+
+```sh
+git clone https://github.com/znation/funes-omp
+funes add omp --from ./funes-omp          # install and register
+funes add omp --from ./funes-omp acme/kb  # ... and bind a memory in the same breath
+```
+
+`funes add` extracts the extension to a fixed `~/.funes/agents/omp`, writes the
+two pointers the automation reads — the `spool` directory `funes index` drains
+and the `sessions` root omp writes — and registers the extension with omp.
+funes's integrations catalog has no `omp` entry yet, so name where the
+integration comes from: `--from` takes a directory holding it (an `hf://buckets/…`
+archive works too, a git URL does not); a bare `funes add omp` stops with
+`the integrations catalog lists no omp`. Re-running `funes add omp` keeps the
+memory bound; `funes add omp local` unbinds it.
+
+omp can install the package by itself as well:
 
 ```sh
 omp plugin install github:znation/funes-omp
 ```
 
-Once `funes` is on your PATH, `funes add` does the same thing and wires up the
-automation: it extracts the extension to a fixed `~/.funes/agents/omp` and
-registers it with omp.
+That is recall only. With no `spool`/`sessions` pointers beside the extension,
+nothing gets converted or indexed: the read tools work, the per-turn automation
+has nothing to do. This verb also shells out to `bun`, so `bun` has to be on
+`PATH` — without it the command fails with
+`Error: Executable not found in $PATH: "bun"` and installs nothing. So does
+`omp plugin uninstall`; `omp install <dir>` and `omp plugin install <dir>` don't.
 
-```sh
-funes add omp --from ./          # this checkout
-funes add omp --from ./ acme/kb  # ... and bind a memory in the same breath
-```
-
-funes's integrations catalog has no `omp` entry yet, so name where the
-integration comes from with `--from <DIR|URL>`; a bare `funes add omp` stops with
-`the integrations catalog lists no omp`. Re-running `funes add omp` keeps the
-memory bound; `funes add omp local` unbinds it.
+`omp install <dir>` links the directory rather than copying it, so the install
+has to stay where it is.
 
 ## Remove
 
@@ -44,16 +58,25 @@ memory bound; `funes add omp local` unbinds it.
 funes remove omp
 ```
 
-Unregisters the extension and takes the whole install with it. Your memory and
-omp's own sessions are untouched. If you installed it with omp alone,
-`omp plugin uninstall funes-omp` removes just the registration.
+Takes the extracted install with it — `~/.funes/agents/omp` and the pointers
+beside it, plus the pre-registry `~/.funes/integrations/omp` if there was one.
+Your memory and omp's own sessions are untouched.
+
+omp has no unregister to call, so the registration outlives the directory: the
+entry in `~/.omp/plugins/omp-plugins.lock.json`, and the `node_modules/funes-omp`
+symlink `omp install` made, which is left dangling. omp tolerates both — `omp
+plugin list` reports no plugins, and a later `funes add` or `omp install`
+re-points the same name at the fresh install. To drop the entry anyway, `omp
+plugin uninstall funes-omp` does it — it removes the symlink and leaves the lock
+entry, which is equally inert — and it needs `bun` on `PATH` too.
 
 ## Requirements
 
 - `funes` on `PATH` (set `FUNES_BIN` to override the binary path).
 - A funes memory the binary can read — local, or a live `hf://` remote (needs
   network + an HF token for a private remote). Bind one with
-  `funes add omp --from ./ <memory>`, or set `FUNES_MEMORY` to pin it explicitly
+  `funes add omp --from ./funes-omp <memory>`, or set `FUNES_MEMORY` to pin it
+  explicitly
   — forwarded as the `funes mcp <memory>` positional, and used as the publish
   target.
 - TruffleHog on `PATH`, or `FUNES_TRUFFLEHOG=/path/to/trufflehog`. `funes`

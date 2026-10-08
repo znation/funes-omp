@@ -1,8 +1,8 @@
 #!/bin/sh
 # `setup add` registers the bundle with omp as an extension and leaves the memory in the file
-# index.ts reads; `setup remove` unregisters it, a pre-registry install with it. Run as funes runs
-# it: from the bundle's place in the registry, with the contract's environment, against an `omp`
-# that only records what it is asked.
+# index.ts reads; `setup remove` drops the records and a pre-registry install with them, and asks omp
+# nothing — it has no unregister. Run as funes runs it: from the bundle's place in the registry, with
+# the contract's environment, against an `omp` that only records what it is asked.
 set -eu
 
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -65,16 +65,20 @@ grep -q "no JS runtime" "$tmp/add.err" || fail "the seed did not say it was left
 [ ! -e "$dir/spool" ] || fail "the spool record stays"
 [ ! -e "$dir/sessions" ] && [ ! -e "$dir/seed-pending" ] || fail "the records stay"
 [ ! -e "$FUNES_HOME/spool/omp" ] || fail "the spool stays"
-[ "$(cat "$FUNES_TEST_CLI_LOG")" = "uninstall $dir" ] || fail "omp was asked:
+# ...and asks omp nothing, because omp has no unregister to ask for. `omp uninstall <x>` is not a
+# subcommand: it falls through to `omp launch`, which starts an agent session with the path as its
+# prompt and drops no registration either way. A registration whose plugin directory is gone is
+# inert, which is what removing the agent leaves behind.
+[ ! -s "$FUNES_TEST_CLI_LOG" ] || fail "remove asked omp:
 $(cat "$FUNES_TEST_CLI_LOG")"
 # Already absent remains a successful no-op.
 "$setup" remove >/dev/null
 
-# With no `omp` on PATH, a pre-registry install still goes, and the rest is spelled out.
+# With no `omp` on PATH, a pre-registry install still goes, and the leftover registration is named.
 legacy="$HOME/.funes/integrations/omp"
 mkdir -p "$legacy"
 printf extension >"$legacy/index.ts"
 PATH=/usr/bin:/bin "$setup" remove >"$tmp/remove.out"
-grep -q "remove the registration manually" "$tmp/remove.out" || fail "no manual step: $(cat "$tmp/remove.out")"
+grep -q "it goes inert once this directory is gone" "$tmp/remove.out" || fail "no manual step: $(cat "$tmp/remove.out")"
 [ ! -e "$legacy" ] || fail "the pre-registry install stays without omp"
 echo "omp setup: ok"
